@@ -1,12 +1,15 @@
-// Copyright 2010 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// Copyright 2020 Google LLC
 
-package filepath
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file or at
+// https://developers.google.com/open-source/licenses/bsd
+
+package glob
 
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -49,7 +52,7 @@ Pattern:
 		star, chunk, pattern = scanChunk(pattern)
 		if star && chunk == "" {
 			// Trailing * matches rest of string unless it has a /.
-			return !strings.Contains(name, string(Separator)), nil
+			return !strings.Contains(name, string(filepath.Separator)), nil
 		}
 		// Look for match at current position.
 		t, ok, err := matchChunk(chunk, name)
@@ -66,7 +69,7 @@ Pattern:
 		if star {
 			// Look for match skipping i+1 bytes.
 			// Cannot skip /.
-			for i := 0; i < len(name) && name[i] != Separator; i++ {
+			for i := 0; i < len(name) && name[i] != filepath.Separator; i++ {
 				t, ok, err := matchChunk(chunk, name[i+1:])
 				if ok {
 					// if we're the last chunk, make sure we exhausted the name
@@ -171,7 +174,7 @@ func matchChunk(chunk, s string) (rest string, ok bool, err error) {
 			}
 
 		case '?':
-			if s[0] == Separator {
+			if s[0] == filepath.Separator {
 				return
 			}
 			_, n := utf8.DecodeRuneInString(s)
@@ -239,7 +242,7 @@ func Glob(pattern string) (matches []string, err error) {
 		return []string{pattern}, nil
 	}
 
-	dir, file := Split(pattern)
+	dir, file := filepath.Split(pattern)
 	volumeLen := 0
 	if runtime.GOOS == "windows" {
 		volumeLen, dir = cleanGlobPathWindows(dir)
@@ -275,7 +278,7 @@ func cleanGlobPath(path string) string {
 	switch path {
 	case "":
 		return "."
-	case string(Separator):
+	case string(filepath.Separator):
 		// do nothing to the path
 		return path
 	default:
@@ -285,7 +288,7 @@ func cleanGlobPath(path string) string {
 
 // cleanGlobPathWindows is windows version of cleanGlobPath.
 func cleanGlobPathWindows(path string) (prefixLen int, cleaned string) {
-	vollen := volumeNameLen(path)
+	vollen := len(filepath.VolumeName(path))
 	switch {
 	case path == "":
 		return 0, "."
@@ -330,7 +333,7 @@ func glob(dir, pattern string, matches []string) (m []string, e error) {
 			return m, err
 		}
 		if matched {
-			m = append(m, Join(dir, n))
+			m = append(m, filepath.Join(dir, n))
 		}
 	}
 	return
