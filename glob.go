@@ -4,30 +4,115 @@
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
 
+// Package glob provides equivalent functionality to filepath.Glob while
+// meeting different performance requirements.
 package glob
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 )
 
-// Glob returns the names of all files matching pattern or nil
-// if there is no matching file. The syntax of patterns is the same
-// as in filepath.Match. The pattern may describe hierarchical names such as
-// /usr/*/bin/ed (assuming the Separator is '/').
+// Glob is similar to filepath.Glob but with different performance concerns.
 //
-// Glob ignores file system errors such as I/O errors reading directories.
-// The only possible returned error is filepath.ErrBadPattern, when pattern
-// is malformed.
-func Glob(pattern string) (matches []string, err error) {
+// Firstly, It can be canceled via the context. Secondly, it makes no guarantees
+// about the order of returned matches. This change allows it to run in O(d+m)
+// memory and O(n) time, where m is the number of match results, d is the depth
+// of the directory tree the pattern is concerned with, and n is the number of
+// files in that tree.
+func Glob(ctx context.Context, pattern string) ([]string, error) {
+	gr := Stream(pattern)
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		<-ctx.Done()
+		gr.Close()
+	}()
+	defer cancel()
+
+	var ret []string
+	for {
+		match, err := gr.Next()
+		if err != nil {
+			return nil, err
+		}
+		if match == "" {
+			break
+		}
+		ret = append(ret, match)
+	}
+	return ret, nil
+}
+
+type GlobResult struct {
+	errors  chan error
+	results chan string
+	cancel  context.CancelFunc
+}
+
+// Stream Returns a GlobResult from which glob matches can be streamed.
+//
+// Stream supports the same pattern syntax and produces the same matches as Go's
+// filepath.Glob, but makes no ordering guarantees.
+func Stream(pattern string) GlobResult {
+	ctx, cancel := context.WithCancel(context.Background())
+	g := GlobResult{
+		errors:  make(chan error),
+		results: make(chan string),
+		cancel:  cancel,
+	}
+	go func() {
+		defer close(g.results)
+		defer close(g.errors)
+		if err := stream(pattern, g.results, ctx.Done()); err != nil {
+			g.errors <- err
+		}
+	}()
+	return g
+}
+
+// Next returns the next match from the pattern. It returns an empty string when
+// the matches are exhausted.
+func (g *GlobResult) Next() (string, error) {
+	// Note: Next never returns filepath.ErrBadPattern if it has previously
+	// returned a match. This isn't specified but it's highly desirable in
+	// terms of least-surprise. I don't think there's a concise way for this
+	// comment to justify this claim; you have to just read `stream` and
+	// `filepath.Match` to convince yourself.
+	select {
+	case err := <-g.errors:
+		g.Close()
+		return "", err
+	case r := <-g.results:
+		return r, nil
+	}
+}
+
+// Close cancels the in-progress globbing and cleans up. You can call this any
+// time, including concurrently with Next. You don't need to call it if Next has
+// returned an empty string.
+func (g *GlobResult) Close() error {
+	g.cancel()
+	for _ = range g.errors {
+	}
+	for _ = range g.results {
+	}
+	return nil
+}
+
+// stream finds files matching pattern and sends their paths on the results
+// channel. It stops (returning nil) if the cancel channel is closed.
+// The caller must drain the results channel.
+func stream(pattern string, results chan<- string, cancel <-chan struct{}) (err error) {
 	if !hasMeta(pattern) {
 		if _, err = os.Lstat(pattern); err != nil {
-			return nil, nil
+			return nil
 		}
-		return []string{pattern}, nil
+		results <- pattern
+		return nil
 	}
 
 	dir, file := filepath.Split(pattern)
@@ -39,22 +124,22 @@ func Glob(pattern string) (matches []string, err error) {
 	}
 
 	if !hasMeta(dir[volumeLen:]) {
-		return glob(dir, file, nil)
+		return glob(dir, file, results, cancel)
 	}
 
-	// Prevent infinite recursion. See issue 15879.
+	// Prevent infinite recursion. See Go issue 15879.
 	if dir == pattern {
-		return nil, filepath.ErrBadPattern
+		return filepath.ErrBadPattern
 	}
 
-	var m []string
-	m, err = Glob(dir)
-	if err != nil {
-		return
-	}
-	for _, d := range m {
-		matches, err = glob(d, file, matches)
-		if err != nil {
+	dirMatches := make(chan string)
+	go func() {
+		err = stream(dir, dirMatches, cancel)
+		close(dirMatches)
+	}()
+
+	for d := range dirMatches {
+		if err = glob(d, file, results, cancel); err != nil {
 			return
 		}
 	}
@@ -94,37 +179,50 @@ func cleanGlobPathWindows(path string) (prefixLen int, cleaned string) {
 }
 
 // glob searches for files matching pattern in the directory dir
-// and appends them to matches. If the directory cannot be
-// opened, it returns the existing matches. New matches are
-// added in lexicographical order.
-func glob(dir, pattern string, matches []string) (m []string, e error) {
-	m = matches
+// and sends them down the results channel. It stops if the chancel channel is
+// closed.
+func glob(dir, pattern string, results chan<- string, cancel <-chan struct{}) error {
 	fi, err := os.Stat(dir)
 	if err != nil {
-		return
+		return err
 	}
 	if !fi.IsDir() {
-		return
+		return nil
 	}
 	d, err := os.Open(dir)
 	if err != nil {
-		return
+		return err
 	}
 	defer d.Close()
 
-	names, _ := d.Readdirnames(-1)
-	sort.Strings(names)
+	for {
+		select {
+		case <-cancel:
+			return nil
+		default:
+		}
 
-	for _, n := range names {
+		names, err := d.Readdirnames(1)
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		n := names[0]
+
 		matched, err := filepath.Match(pattern, n)
 		if err != nil {
-			return m, err
+			return err
 		}
 		if matched {
-			m = append(m, filepath.Join(dir, n))
+			select {
+			case results <- filepath.Join(dir, n):
+			case <-cancel:
+				return nil
+			}
 		}
 	}
-	return
 }
 
 // hasMeta reports whether path contains any of the magic characters

@@ -7,6 +7,7 @@
 package glob
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -63,7 +64,7 @@ func TestGlob(t *testing.T) {
 			}
 			results = cleaned
 		}
-		matches, err := Glob(pattern)
+		matches, err := Glob(context.Background(), pattern)
 		if err != nil {
 			t.Errorf("Glob error for %q: %s", pattern, err)
 			continue
@@ -74,7 +75,7 @@ func TestGlob(t *testing.T) {
 	}
 
 	for _, pattern := range []string{"no_match", "../*/no_match"} {
-		matches, err := Glob(pattern)
+		matches, err := Glob(context.Background(), pattern)
 		if err != nil {
 			t.Errorf("Glob error for %q: %s", pattern, err)
 			continue
@@ -86,7 +87,7 @@ func TestGlob(t *testing.T) {
 }
 
 func TestGlobError(t *testing.T) {
-	_, err := Glob("[]")
+	_, err := Glob(context.Background(), "[]")
 	if err == nil {
 		t.Error("expected error for bad pattern; got none")
 	}
@@ -95,7 +96,7 @@ func TestGlobError(t *testing.T) {
 func TestGlobUNC(t *testing.T) {
 	// Just make sure this runs without crashing for now.
 	// See issue 15879.
-	Glob(`\\?\C:\*`)
+	Glob(context.Background(), `\\?\C:\*`)
 }
 
 var globSymlinkTests = []struct {
@@ -135,7 +136,7 @@ func TestGlobSymlink(t *testing.T) {
 			// Break the symlink.
 			os.Remove(path)
 		}
-		matches, err := Glob(dest)
+		matches, err := Glob(context.Background(), dest)
 		if err != nil {
 			t.Errorf("GlobSymlink error for %q: %s", dest, err)
 		}
@@ -161,7 +162,7 @@ func (test *globTest) buildWant(root string) []string {
 
 func (test *globTest) globAbs(root, rootPattern string) error {
 	p := filepath.FromSlash(rootPattern + `\` + test.pattern)
-	have, err := Glob(p)
+	have, err := Glob(context.Background(), p)
 	if err != nil {
 		return err
 	}
@@ -175,7 +176,7 @@ func (test *globTest) globAbs(root, rootPattern string) error {
 
 func (test *globTest) globRel(root string) error {
 	p := root + filepath.FromSlash(test.pattern)
-	have, err := Glob(p)
+	have, err := Glob(context.Background(), p)
 	if err != nil {
 		return err
 	}
@@ -310,13 +311,50 @@ func TestNonWindowsGlobEscape(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skipf("skipping non-windows specific test")
 	}
-	pattern := `\streaming.go`
-	want := []string{"streaming.go"}
-	matches, err := Glob(pattern)
+	pattern := `\glob.go`
+	want := []string{"glob.go"}
+	matches, err := Glob(context.Background(), pattern)
 	if err != nil {
 		t.Fatalf("Glob error for %q: %s", pattern, err)
 	}
 	if !reflect.DeepEqual(matches, want) {
 		t.Fatalf("Glob(%#q) = %v want %v", pattern, matches, want)
+	}
+}
+
+func TestPartialGlob(t *testing.T) {
+	gr := Stream("testdata/**")
+
+	i := 0
+	for i < 3 {
+		match, err := gr.Next()
+		i++
+		if err != nil {
+			t.Fatalf("Next() returned unexpected error: %v", err)
+		}
+		if match == "" {
+			t.Fatalf("Next() unexpectedly stopped producing matches (returned \"\") after %d calls", i)
+		}
+	}
+
+	err := gr.Close()
+	if err != nil {
+		t.Fatalf("Close() returned unexpected error: %v", err)
+	}
+
+	match, err := gr.Next()
+	if err != nil {
+		t.Errorf("After Close(), Next() returned unexpected error: %v", err)
+	}
+	if match != "" {
+		t.Errorf("After Close(), Next() returned non-empty match %q", match)
+	}
+}
+
+func TestCloseInvalidPattern(t *testing.T) {
+	gr := Stream("[]") // This is an invalid glob pattern.
+	err := gr.Close()
+	if err != nil {
+		t.Errorf("Close() on invalid patterns' result returned unexpected error: %v", err)
 	}
 }
