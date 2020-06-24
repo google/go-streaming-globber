@@ -1,20 +1,24 @@
-// Copyright 2009 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// Copyright 2020 Google LLC
 
-package filepath_test
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file or at
+// https://developers.google.com/open-source/licenses/bsd
+
+package glob
 
 import (
 	"fmt"
-	"internal/testenv"
 	"io/ioutil"
 	"os"
-	. "path/filepath"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 type MatchTest struct {
@@ -96,8 +100,8 @@ func TestMatch(t *testing.T) {
 				// no escape allowed on windows.
 				continue
 			}
-			pattern = Clean(pattern)
-			s = Clean(s)
+			pattern = filepath.Clean(pattern)
+			s = filepath.Clean(s)
 		}
 		ok, err := Match(pattern, s)
 		if ok != tt.match || err != tt.err {
@@ -116,32 +120,48 @@ func contains(vector []string, s string) bool {
 	return false
 }
 
-var globTests = []struct {
-	pattern, result string
-}{
-	{"match.go", "match.go"},
-	{"mat?h.go", "match.go"},
-	{"*", "match.go"},
-	{"../*/match.go", "../filepath/match.go"},
+func cmpStrings(x, y string) bool {
+	return x < y
 }
 
+var sortStringSlices = cmpopts.SortSlices(cmpStrings)
+
 func TestGlob(t *testing.T) {
-	for _, tt := range globTests {
+	if err := os.Chdir("testdata"); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir("..")
+
+	for _, tt := range []struct {
+		pattern string
+		results []string
+	}{
+		{"match", []string{"match"}},
+		{"mat?h", []string{"match"}},
+		{"../*/match", []string{"../testdata/match"}},
+		{"*", []string{"a", "b", "match", "other"}},
+		{"*/*", []string{"a/a", "a/b", "a/c", "b/a"}},
+	} {
 		pattern := tt.pattern
-		result := tt.result
+		results := tt.results
 		if runtime.GOOS == "windows" {
-			pattern = Clean(pattern)
-			result = Clean(result)
+			pattern = filepath.Clean(pattern)
+			var cleaned []string
+			for _, r := range results {
+				cleaned = append(cleaned, r)
+			}
+			results = cleaned
 		}
 		matches, err := Glob(pattern)
 		if err != nil {
 			t.Errorf("Glob error for %q: %s", pattern, err)
 			continue
 		}
-		if !contains(matches, result) {
-			t.Errorf("Glob(%#q) = %#v want %v", pattern, matches, result)
+		if diff := cmp.Diff(results, matches, sortStringSlices); diff != "" {
+			t.Errorf("Bad results from Glob(%#q), -want +got: %v", pattern, diff)
 		}
 	}
+
 	for _, pattern := range []string{"no_match", "../*/no_match"} {
 		matches, err := Glob(pattern)
 		if err != nil {
@@ -176,7 +196,9 @@ var globSymlinkTests = []struct {
 }
 
 func TestGlobSymlink(t *testing.T) {
-	testenv.MustHaveSymlink(t)
+	if runtime.GOOS == "windows" {
+		t.Skipf("skipping symlink test on Windows")
+	}
 
 	tmpDir, err := ioutil.TempDir("", "globsymlink")
 	if err != nil {
@@ -185,8 +207,8 @@ func TestGlobSymlink(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	for _, tt := range globSymlinkTests {
-		path := Join(tmpDir, tt.path)
-		dest := Join(tmpDir, tt.dest)
+		path := filepath.Join(tmpDir, tt.path)
+		dest := filepath.Join(tmpDir, tt.dest)
 		f, err := os.Create(path)
 		if err != nil {
 			t.Fatal(err)
@@ -220,14 +242,14 @@ type globTest struct {
 func (test *globTest) buildWant(root string) []string {
 	want := make([]string, 0)
 	for _, m := range test.matches {
-		want = append(want, root+FromSlash(m))
+		want = append(want, root+filepath.FromSlash(m))
 	}
 	sort.Strings(want)
 	return want
 }
 
 func (test *globTest) globAbs(root, rootPattern string) error {
-	p := FromSlash(rootPattern + `\` + test.pattern)
+	p := filepath.FromSlash(rootPattern + `\` + test.pattern)
 	have, err := Glob(p)
 	if err != nil {
 		return err
@@ -241,7 +263,7 @@ func (test *globTest) globAbs(root, rootPattern string) error {
 }
 
 func (test *globTest) globRel(root string) error {
-	p := root + FromSlash(test.pattern)
+	p := root + filepath.FromSlash(test.pattern)
 	have, err := Glob(p)
 	if err != nil {
 		return err
@@ -271,7 +293,7 @@ func TestWindowsGlob(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// /tmp may itself be a symlink
-	tmpDir, err = EvalSymlinks(tmpDir)
+	tmpDir, err = filepath.EvalSymlinks(tmpDir)
 	if err != nil {
 		t.Fatal("eval symlink for tmp dir:", err)
 	}
@@ -292,13 +314,13 @@ func TestWindowsGlob(t *testing.T) {
 		"dir/d/bin/git.exe",
 	}
 	for _, dir := range dirs {
-		err := os.MkdirAll(Join(tmpDir, dir), 0777)
+		err := os.MkdirAll(filepath.Join(tmpDir, dir), 0777)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	for _, file := range files {
-		err := ioutil.WriteFile(Join(tmpDir, file), nil, 0666)
+		err := ioutil.WriteFile(filepath.Join(tmpDir, file), nil, 0666)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -377,8 +399,8 @@ func TestNonWindowsGlobEscape(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skipf("skipping non-windows specific test")
 	}
-	pattern := `\match.go`
-	want := []string{"match.go"}
+	pattern := `\streaming.go`
+	want := []string{"streaming.go"}
 	matches, err := Glob(pattern)
 	if err != nil {
 		t.Fatalf("Glob error for %q: %s", pattern, err)
