@@ -47,6 +47,7 @@ func Glob(ctx context.Context, pattern string) ([]string, error) {
 	return ret, nil
 }
 
+// Result is a stream of results from globbing against a pattern.
 type Result struct {
 	errors  chan error
 	results chan string
