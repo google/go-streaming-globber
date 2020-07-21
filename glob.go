@@ -47,19 +47,19 @@ func Glob(ctx context.Context, pattern string) ([]string, error) {
 	return ret, nil
 }
 
-type GlobResult struct {
+type Result struct {
 	errors  chan error
 	results chan string
 	cancel  context.CancelFunc
 }
 
-// Stream Returns a GlobResult from which glob matches can be streamed.
+// Stream Returns a Result from which glob matches can be streamed.
 //
 // Stream supports the same pattern syntax and produces the same matches as Go's
 // filepath.Glob, but makes no ordering guarantees.
-func Stream(pattern string) GlobResult {
+func Stream(pattern string) Result {
 	ctx, cancel := context.WithCancel(context.Background())
-	g := GlobResult{
+	g := Result{
 		errors:  make(chan error),
 		results: make(chan string),
 		cancel:  cancel,
@@ -76,7 +76,7 @@ func Stream(pattern string) GlobResult {
 
 // Next returns the next match from the pattern. It returns an empty string when
 // the matches are exhausted.
-func (g *GlobResult) Next() (string, error) {
+func (g *Result) Next() (string, error) {
 	// Note: Next never returns filepath.ErrBadPattern if it has previously
 	// returned a match. This isn't specified but it's highly desirable in
 	// terms of least-surprise. I don't think there's a concise way for this
@@ -94,7 +94,7 @@ func (g *GlobResult) Next() (string, error) {
 // Close cancels the in-progress globbing and cleans up. You can call this any
 // time, including concurrently with Next. You don't need to call it if Next has
 // returned an empty string.
-func (g *GlobResult) Close() error {
+func (g *Result) Close() error {
 	g.cancel()
 	for _ = range g.errors {
 	}
