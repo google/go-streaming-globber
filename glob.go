@@ -107,9 +107,9 @@ func (g *Result) Close() error {
 // stream finds files matching pattern and sends their paths on the results
 // channel. It stops (returning nil) if the cancel channel is closed.
 // The caller must drain the results channel.
-func stream(pattern string, results chan<- string, cancel <-chan struct{}) (err error) {
+func stream(pattern string, results chan<- string, cancel <-chan struct{}) error {
 	if !hasMeta(pattern) {
-		if _, err = os.Lstat(pattern); err != nil {
+		if _, err := os.Lstat(pattern); err != nil {
 			return nil
 		}
 		results <- pattern
@@ -134,17 +134,19 @@ func stream(pattern string, results chan<- string, cancel <-chan struct{}) (err 
 	}
 
 	dirMatches := make(chan string)
+	var streamErr error
 	go func() {
-		err = stream(dir, dirMatches, cancel)
+		streamErr = stream(dir, dirMatches, cancel)
 		close(dirMatches)
 	}()
 
 	for d := range dirMatches {
-		if err = glob(d, file, results, cancel); err != nil {
-			return
+		if err := glob(d, file, results, cancel); err != nil {
+			return err
 		}
 	}
-	return
+
+	return streamErr
 }
 
 // cleanGlobPath prepares path for glob matching.
