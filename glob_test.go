@@ -53,6 +53,7 @@ func TestGlob(t *testing.T) {
 		{"../*/match", []string{"../testdata/match"}},
 		{"*", []string{"a", "b", "match", "other"}},
 		{"*/*", []string{"a/a", "a/b", "a/c", "b/a"}},
+		{"no-existo/*", []string{}},
 	} {
 		pattern := tt.pattern
 		results := tt.results

@@ -184,7 +184,7 @@ func cleanGlobPathWindows(path string) (prefixLen int, cleaned string) {
 func glob(dir, pattern string, results chan<- string, cancel <-chan struct{}) error {
 	fi, err := os.Stat(dir)
 	if err != nil {
-		return err
+		return nil
 	}
 	if !fi.IsDir() {
 		return nil
