@@ -33,7 +33,7 @@ func Glob(ctx context.Context, pattern string) ([]string, error) {
 	}()
 	defer cancel()
 
-	var ret []string
+	ret := make([]string, 0)
 	for {
 		match, err := gr.Next()
 		if err != nil {
