@@ -185,7 +185,7 @@ func cleanGlobPathWindows(path string) (prefixLen int, cleaned string) {
 }
 
 // glob searches for files matching pattern in the directory dir
-// and sends them down the results channel. It stops if the chancel channel is
+// and sends them down the results channel. It stops if the cancel channel is
 // closed.
 func glob(dir, pattern string, results chan<- string, cancel <-chan struct{}) error {
 	fi, err := os.Stat(dir)
