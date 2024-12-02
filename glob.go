@@ -77,12 +77,17 @@ func Stream(pattern string) Result {
 
 // Next returns the next match from the pattern. It returns an empty string when
 // the matches are exhausted.
+//
+// Next might block while reading directory entries in the background.
 func (g *Result) Next() (string, error) {
 	return g.NextWithContext(context.Background())
 }
 
 // NextWithContext returns the next match from the pattern. It returns an empty
-// string when the matches are exhausted, or the given context was canceled.
+// string when the matches are exhausted.
+//
+// NextWithContext might block while reading directory entries in the
+// background, but respects context cancelation.
 func (g *Result) NextWithContext(ctx context.Context) (string, error) {
 	// Note: Next never returns filepath.ErrBadPattern if it has previously
 	// returned a match. This isn't specified but it's highly desirable in
