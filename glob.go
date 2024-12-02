@@ -92,7 +92,6 @@ func (g *Result) Next() (string, error) {
 	case r := <-g.results:
 		return r, nil
 	case <-g.done:
-		g.Close()
 		return "", nil
 	}
 }
