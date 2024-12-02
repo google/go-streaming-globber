@@ -51,6 +51,7 @@ func Glob(ctx context.Context, pattern string) ([]string, error) {
 type Result struct {
 	errors  chan error
 	results chan string
+	done    <-chan struct{}
 	cancel  context.CancelFunc
 }
 
@@ -63,6 +64,7 @@ func Stream(pattern string) Result {
 	g := Result{
 		errors:  make(chan error),
 		results: make(chan string),
+		done:    ctx.Done(),
 		cancel:  cancel,
 	}
 	go func() {
@@ -89,6 +91,9 @@ func (g *Result) Next() (string, error) {
 		return "", err
 	case r := <-g.results:
 		return r, nil
+	case <-g.done:
+		g.Close()
+		return "", nil
 	}
 }
 
