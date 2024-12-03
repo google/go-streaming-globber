@@ -69,7 +69,10 @@ func Stream(pattern string) Result {
 		defer close(g.results)
 		defer close(g.errors)
 		if err := stream(pattern, g.results, ctx.Done()); err != nil {
-			g.errors <- err
+			select {
+			case g.errors <- err:
+			case <-ctx.Done():
+			}
 		}
 	}()
 	return g
@@ -105,15 +108,11 @@ func (g *Result) NextWithContext(ctx context.Context) (string, error) {
 	}
 }
 
-// Close cancels the in-progress globbing and cleans up. You can call this any
-// time, including concurrently with Next. You don't need to call it if Next has
-// returned an empty string.
+// Close cancels the in-progress globbing. You can call this any time, including
+// concurrently with Next. You don't need to call it if Next has returned an
+// empty string.
 func (g *Result) Close() error {
 	g.cancel()
-	for _ = range g.errors {
-	}
-	for _ = range g.results {
-	}
 	return nil
 }
 
