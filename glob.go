@@ -125,7 +125,10 @@ func stream(pattern string, results chan<- string, cancel <-chan struct{}) error
 		if _, err := os.Lstat(pattern); err != nil {
 			return nil
 		}
-		results <- pattern
+		select {
+		case results <- pattern:
+		case <-cancel:
+		}
 		return nil
 	}
 
