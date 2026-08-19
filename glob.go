@@ -120,6 +120,20 @@ func (g *Result) Close() error {
 // channel. It stops (returning nil) if the cancel channel is closed.
 // The caller must drain the results channel.
 func stream(pattern string, results chan<- string, cancel <-chan struct{}) error {
+	return streamWithLimit(pattern, 0, results, cancel)
+}
+
+func streamWithLimit(pattern string, depth int, results chan<- string, cancel <-chan struct{}) error {
+	const pathSeparatorsLimit = 10000
+	if depth == pathSeparatorsLimit {
+		return filepath.ErrBadPattern
+	}
+
+	// Check pattern is well-formed.
+	if _, err := filepath.Match(pattern, ""); err != nil {
+		return err
+	}
+
 	if !hasMeta(pattern) {
 		if _, err := os.Lstat(pattern); err != nil {
 			return nil
@@ -151,7 +165,7 @@ func stream(pattern string, results chan<- string, cancel <-chan struct{}) error
 	dirMatches := make(chan string)
 	var streamErr error
 	go func() {
-		streamErr = stream(dir, dirMatches, cancel)
+		streamErr = streamWithLimit(dir, depth+1, dirMatches, cancel)
 		close(dirMatches)
 	}()
 

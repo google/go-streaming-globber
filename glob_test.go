@@ -87,6 +87,16 @@ func TestGlob(t *testing.T) {
 	}
 }
 
+func TestCVE202230632(t *testing.T) {
+	// Prior to CVE-2022-30632, this would cause a stack exhaustion given a
+	// large number of separators (more than 4,000,000). There is now a limit
+	// of 10,000.
+	_, err := Glob(t.Context(), "/*"+strings.Repeat("/", 10001))
+	if err != filepath.ErrBadPattern {
+		t.Fatalf("Glob returned err=%v, want ErrBadPattern", err)
+	}
+}
+
 func TestGlobError(t *testing.T) {
 	_, err := Glob(context.Background(), "[]")
 	if err == nil {
